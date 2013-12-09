@@ -13,12 +13,12 @@ from math import floor
 class File():
 
     def __init__(self, num_pieces, piece_size, popularity, identifier):
-        self.num_numpieces = num_pieces
+        self.num_pieces = num_pieces
         self.piece_size = piece_size
         self.file_size = piece_size*num_pieces
 
         self.identifier = identifier
-        self.popularity
+        self.popularity = popularity
 
     def isComplete(self, pieces):
         return len(pieces) == self.piece_size
@@ -29,54 +29,85 @@ class File():
     def __hash__(self):
         return hash(self.identifier)
 
-class Computer:
+    def __repr__(self):
+        return repr(self.identifier)
 
-    def __init__(self, down_rate, up_rate, files_life_time, max_trackers): # files_life_time means the amount of time  a file is kept once the download is completed
+class Computer:
+    
+    def __init__(self, down_rate, up_rate, files_life_time, max_trackers, identifier = "user"): # files_life_time means the amount of time  a file is kept once the download is completed
         self.down_rate = down_rate
         self.up_rate = up_rate
         self.f_life_time = files_life_time
         self.max_trackers = max_trackers
         self.files = []
+        self.identifier = identifier
         self.setTrackers([]) # [ (comp, file, percent), ...], where percent is used by the download method to measure how moch was already downloaded
         self.folder = {} # self.folder is a dictionary with all the torrents the machine have and it's pieces
         self.complete_folder = [] #list of all complete torrents
-        self.cache = 0
-        self.up_available #its how much a new connection can ask from this one
+
+        self.up_available = 0 #its how much a new connection can ask from this one
 
     def setTrackers(self, trackers):
         self.trackers = trackers[:]
 
-    def requestFragments(self, computer, file_f):
-        p_list = computer.get_pieces_list(file_f)
-        if len(p_list) == 0:
-            p_list = self._complete_folder.get(file_f, [])
+    def setNetwork(self, net):
+        self.net = net
 
-    def addpieces(self, file_f, pieces):
-        assert type(b) is set, "[addpieces] it's not e set!"
-        self.folder[file_f] = self.get_pieces_list(file_f).union(paces)
+    def requestFragments(self, computer, torrent):
+        p_list = computer.getPieces(torrent)
+        if torrent in computer.complete_folder:
+            p_list = set(range(torrent.num_pieces)).difference(self.folder[torrent])
+        return p_list
 
-    def getPiecesList(self, file_f):
-        return self.folder.get(file_f, [])
+    def addPieces(self, torrent, pieces):
+        assert type(pieces) is set, "[addPieces] it's not a set!"
+        self.folder[torrent] = self.getPieces(torrent).union(pieces)
+        if len(self.folder[torrent]) == torrent.num_pieces:
+            del(self.folder[torrent])
+            self.complete_folder.append(torrent)
+
+    def getPieces(self, file_f):
+        return self.folder.get(file_f, set())
 
     def getCompleteFiles(self):
         return self.complete_folder[:]
 
     def downloadClock(self, time = 1, resolution = 1):
-        cache += self.down_rate*time
+        cache = self.down_rate*time
         while cache >= resolution:
+            if len(self.trackers) == 0:
+                for torrent in self.folder.keys():
+                    self.trackers = map(lambda x: (x,torrent, 0), self.net.findTrackers(torrent)[0:self.max_trackers])
+                if len(self.trackers) == 0:
+                    break
             tracker, torrent, downloaded = self.trackers.pop(0)
+            if self.hasCompleteTorrent(torrent):
+                continue
+            #print "not here3", self.trackers, self.identifier, self.folder[torrent]
+            #print self.requestFragments(tracker, torrent), tracker.identifier,tracker.complete_folder, '\n'
             files = self.requestFragments(tracker, torrent)
+            #print tracker.folder[torrent], files
             if len(files) == 0:
                 cache += downloaded
                 continue
-            down_available = min(tracker.up_available, self.cache)
-            packet = files[0:round((downloaded+down_available)/ torrent.piece_size)]
+            #print "not here2"   
+            down_available = min(tracker.up_available, cache)
+            tracker.up_available -= down_available
+            #print "down_available,", self.identifier, down_available
+            num_pieces = min((downloaded+down_available)/ torrent.piece_size, len(files))
+            pieces = []
+            files_iter = iter(files)
+            for _ in range(num_pieces):
+                pieces.append(files_iter.next())
+            self.addPieces(torrent, set(pieces))
+            #print "not here"    
             cache -= down_available
-            downloaded = down_available + downloaded - torrent.piece_size*len(packet)
+            downloaded = down_available + downloaded - torrent.piece_size*num_pieces
             self.trackers.append((tracker, torrent, downloaded))
+            #print "not here1"   
 
     def uploadClock(self, time = 1):
-        self.up_available += self.up_rate
+        self.up_available = self.up_rate
     
     def hasTorrent(self, torrent):
         return torrent in self.folder or torrent in self.complete_folder
@@ -84,31 +115,87 @@ class Computer:
     def hasCompleteTorrent(self, torrent):
         return torrent in self.complete_folder
 
+    def __repr__(self):
+        return repr(self.identifier)
+
 
 class Network():
     
     def __init__(self, computers): #assume all computers are interconnected
         self.computers = computers[:]
+        for comp in self.computers:
+            comp.setNetwork(self)
 
     def findSeeds(self, torrent):
-        map(lambda x: x.hasCompleteTorrent(torrent), self.computers)
+        return filter(lambda x: x.hasCompleteTorrent(torrent), self.computers)
 
-    def insertTorrent(self, file_f): #it iserts a file in one of the computers chose from random
+    def findTrackers(self, torrent):
+        return filter(lambda x: x.hasTorrent(torrent), self.computers)
+
+    def insertTorrent(self, torrent): #it iserts a file in one of the computers chose from random
         for comp in self.computers:
-            if random() < filef.popularity:
-                comp.addpieces(self, file_f, [])
-        comp = choice(self.computer)
-        comp.addpieces( self, file_f, range(len(file_f.piece_size)) )
+            if random() < torrent.popularity:
+                comp.addPieces(torrent, set())
+        comp = choice(self.computers)
+        comp.addPieces( torrent, set(range((torrent.num_pieces))) )
         
+    def clock(self):
+        for comp in self.computers:
+            comp.uploadClock()
+        for comp in self.computers:
+            comp.downloadClock()
 
     def toFile(self, f):
         pass #json.dump(obj, f)
         #TODO
 
 
-if __name__ == "__main__":
+def test1():
     ''' create two computers
         add them to the network
-        add a file to one of of them
+        add a file to one of them
         watch while the file is transfered (prints)
     '''
+
+    f = File(16, 8, 1.0, "A1")
+    c_a = Computer(8, 8, 1000, 5, 'C1')
+    c_b = Computer(8, 8, 1000, 5, 'C2')
+
+    net = Network([c_a, c_b])
+    net.insertTorrent(f)
+    #c_b.addPieces( f, set(range((f.num_pieces))) )
+    #c_a.addPieces( f, set([]))
+
+    for i in range(32):
+        print 'C1:', c_a.folder, c_a.complete_folder
+        print 'C2:', c_b.folder, c_b.complete_folder,'\n'
+        #print 'trackers:', c_a.trackers, c_b.trackers
+        net.clock()
+
+def test2():
+
+    ''' create 3 computers
+        add them to the network
+        add a file to one of them
+        watch while the file is transfered (prints)
+    '''
+
+    f = File(16, 8, 1.0, "A1")
+    c_a = Computer(8, 8, 1000, 5, 'C1')
+    c_b = Computer(8, 8, 1000, 5, 'C2')
+    c_c = Computer(8, 8, 1000, 5, 'C3')
+
+    net = Network([c_a, c_b, c_c])
+    net.insertTorrent(f)
+    #c_b.addPieces( f, set(range((f.num_pieces))) )
+    #c_a.addPieces( f, set([]))
+
+    for i in range(32):
+        print 'C1:', c_a.folder, c_a.complete_folder
+        print 'C2:', c_b.folder, c_b.complete_folder
+        print 'C3:', c_c.folder, c_c.complete_folder,'\n'
+        #print 'trackers:', c_a.trackers, c_b.trackers
+        net.clock()
+if __name__ == "__main__":
+    #test1()
+    test2()
