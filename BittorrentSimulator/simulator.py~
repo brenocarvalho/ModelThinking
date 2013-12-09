@@ -93,9 +93,6 @@ class Network():
     def findSeeds(self, torrent):
         map(lambda x: x.hasCompleteTorrent(torrent), self.computers)
 
-    def findTrackers(self, torrent):
-        map(lambda x: x.hasTorrent(torrent), self.computers)
-
     def insertTorrent(self, file_f): #it iserts a file in one of the computers chose from random
         for comp in self.computers:
             if random() < filef.popularity:
